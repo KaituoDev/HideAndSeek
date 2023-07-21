@@ -1,5 +1,5 @@
-api-version: 1.13
-name: MyGame
-main: fun.kaituo.MyGame
+api-version: 1.18
+name: HideAndSeek
+main: fun.kaituo.HideAndSeek
 version: 1.0
 depend: [GameUtils]

@@ -5,11 +5,11 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>fun.kaituo</groupId>
-    <artifactId>GameTemplate</artifactId>
+    <artifactId>HideAndSeek</artifactId>
     <version>1.0</version>
     <packaging>jar</packaging>
 
-    <name>GameTemplate</name>
+    <name>HideAndSeek</name>
 
     <properties>
         <java.version>17</java.version>
@@ -63,8 +63,8 @@
             <url>https://nexus.kaituo.fun/repository/maven-releases/</url>
         </repository>
         <repository>
-            <id>spigotmc-repo</id>
-            <url>https://hub.spigotmc.org/nexus/content/repositories/snapshots/</url>
+            <id>paper-repo</id>
+            <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
         <repository>
             <id>sonatype</id>
@@ -74,8 +74,8 @@
 
     <dependencies>
         <dependency>
-            <groupId>org.spigotmc</groupId>
-            <artifactId>spigot-api</artifactId>
+            <groupId>io.papermc.paper</groupId>
+            <artifactId>paper-api</artifactId>
             <version>1.18.2-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>

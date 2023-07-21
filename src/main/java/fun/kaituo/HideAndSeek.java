@@ -15,16 +15,13 @@ import java.util.List;
 import static fun.kaituo.GameUtils.unregisterGame;
 import static fun.kaituo.GameUtils.world;
 
-public class MyGame extends JavaPlugin implements Listener {
+public class HideAndSeek extends JavaPlugin implements Listener {
 
     List<Player> players;
 
-    public static MyGameGame getGameInstance() {
-        return MyGameGame.getInstance();
+    public static HideAndSeekGame getGameInstance() {
+        return HideAndSeekGame.getInstance();
     }
-
-
-
 
     public void onEnable() {
         players = new ArrayList<>();
