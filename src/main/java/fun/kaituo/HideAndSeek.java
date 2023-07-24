@@ -26,6 +26,7 @@ public class HideAndSeek extends JavaPlugin implements Listener {
     public void onEnable() {
         players = new ArrayList<>();
         Bukkit.getPluginManager().registerEvents(this, this);
+        Bukkit.getPluginManager().registerEvents(getGameInstance(), this);
         GameUtils.registerGame(getGameInstance());
     }
 
@@ -38,6 +39,7 @@ public class HideAndSeek extends JavaPlugin implements Listener {
                 Bukkit.getPluginManager().callEvent(new PlayerChangeGameEvent(p, getGameInstance(), null));
             }
         }
+        getGameInstance().onDisable();
         unregisterGame(getGameInstance());
     }
 }
