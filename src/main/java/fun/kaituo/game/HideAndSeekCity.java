@@ -1,8 +1,10 @@
-package fun.kaituo;
+package fun.kaituo.game;
 
-import fun.kaituo.event.PlayerChangeGameEvent;
+import fun.kaituo.gameutils.GameUtils;
+import fun.kaituo.gameutils.event.PlayerChangeGameEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
@@ -12,22 +14,28 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.util.ArrayList;
 import java.util.List;
 
-import static fun.kaituo.GameUtils.unregisterGame;
-import static fun.kaituo.GameUtils.world;
+public class HideAndSeekCity extends JavaPlugin implements Listener {
 
-public class HideAndSeek extends JavaPlugin implements Listener {
-
+    GameUtils gameUtils;
+    World world;
     List<Player> players;
 
-    public static HideAndSeekGame getGameInstance() {
-        return HideAndSeekGame.getInstance();
+    public static HideAndSeekCityGame getGameInstance() {
+        return HideAndSeekCityGame.getInstance();
     }
 
     public void onEnable() {
         players = new ArrayList<>();
         Bukkit.getPluginManager().registerEvents(this, this);
         Bukkit.getPluginManager().registerEvents(getGameInstance(), this);
-        GameUtils.registerGame(getGameInstance());
+
+        gameUtils = (GameUtils) Bukkit.getPluginManager().getPlugin("GameUtils");
+        if (gameUtils == null) {
+            getLogger().severe("No GameUtils instance found.");
+            return;
+        }
+        gameUtils.registerGame(getGameInstance());
+        world = gameUtils.getWorld();
     }
 
     public void onDisable() {
@@ -40,6 +48,6 @@ public class HideAndSeek extends JavaPlugin implements Listener {
             }
         }
         getGameInstance().onDisable();
-        unregisterGame(getGameInstance());
+        gameUtils.unregisterGame(getGameInstance());
     }
 }
