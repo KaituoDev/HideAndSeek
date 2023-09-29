@@ -1,5 +1,5 @@
 api-version: 1.20
-name: HideAndSeek
-main: fun.kaituo.HideAndSeek
+name: HideAndSeekCity
+main: fun.kaituo.game.HideAndSeekCity
 version: 1.0
 depend: [GameUtils, ProtocolLib]

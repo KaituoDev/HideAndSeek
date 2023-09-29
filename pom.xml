@@ -4,12 +4,12 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>fun.kaituo</groupId>
-    <artifactId>HideAndSeek</artifactId>
+    <groupId>fun.kaituo.game</groupId>
+    <artifactId>HideAndSeekCity</artifactId>
     <version>1.0</version>
     <packaging>jar</packaging>
 
-    <name>HideAndSeek</name>
+    <name>HideAndSeekCity</name>
 
     <properties>
         <java.version>17</java.version>
@@ -48,6 +48,26 @@
                 <artifactId>maven-help-plugin</artifactId>
                 <version>3.2.0</version>
             </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>wagon-maven-plugin</artifactId>
+                <version>2.0.2</version>
+                <executions>
+                    <execution>
+                        <id>upload-assembly</id>
+                        <phase>install</phase>
+                        <goals>
+                            <goal>upload-single</goal>
+                        </goals>
+                        <configuration>
+                            <serverId>kaituo-minigame-ftp</serverId> <!-- references the server declaration -->
+                            <fromFile>${project.build.directory}/${project.build.finalName}.jar</fromFile>
+                            <url>ftp://mc.kaituo.fun:22000</url>
+                            <toFile>${project.artifactId}.jar</toFile>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
         <resources>
             <resource>
@@ -55,7 +75,14 @@
                 <filtering>true</filtering>
             </resource>
         </resources>
-        <finalName>HideAndSeek</finalName>
+        <defaultGoal>install</defaultGoal>
+        <extensions>
+            <extension>
+                <groupId>org.apache.maven.wagon</groupId>
+                <artifactId>wagon-ftp</artifactId>
+            </extension>
+        </extensions>
+        <directory>target</directory>
     </build>
 
     <repositories>
