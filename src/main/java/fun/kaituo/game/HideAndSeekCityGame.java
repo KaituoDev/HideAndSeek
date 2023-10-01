@@ -9,7 +9,6 @@ import com.comphenix.protocol.wrappers.EnumWrappers;
 import com.comphenix.protocol.wrappers.Pair;
 import com.destroystokyo.paper.ParticleBuilder;
 import fun.kaituo.gameutils.Game;
-import fun.kaituo.gameutils.GameUtils;
 import fun.kaituo.gameutils.PlayerQuitData;
 import fun.kaituo.gameutils.utils.GameItemStackTag;
 import fun.kaituo.gameutils.utils.ItemStackBuilder;
@@ -99,9 +98,6 @@ public class HideAndSeekCityGame extends Game implements Listener {
         playersTeam.setOption(Team.Option.NAME_TAG_VISIBILITY, Team.OptionStatus.NEVER);
         playersTeam.setCanSeeFriendlyInvisibles(false);
         playersTeam.setAllowFriendlyFire(true);
-        tauntItem = new ItemStackBuilder(Material.GOLD_NUGGET).setDisplayName("§r§e嘲讽").setLore("§r§5效果: 自己所在位置发出声音以及粒子效果，寻找时间减3秒", "§r§5CD: 15秒").setGameItemStackTag(gameUtils.getNamespacedKey(), new GameItemStackTag()).build();
-        soundItem = new ItemStackBuilder(Material.AMETHYST_SHARD).setDisplayName("§r§c发声").setLore("§r§5效果: 所有躲藏者发出声音", "§r§5CD: 30秒").setGameItemStackTag(gameUtils.getNamespacedKey(), new GameItemStackTag()).build();
-        seekerWeaponItem = new ItemStackBuilder(Material.DIAMOND_SWORD).setUnbreakable(true).setGameItemStackTag(gameUtils.getNamespacedKey(), new GameItemStackTag()).build();
         hiderStartLocation = new Location(world, -2036.5, 57.0, -20.5);
         seekerStartLocation = new Location(world, -2021.5, 64.0, 21.5);
         gameTimeSignLocation = new Location(world, -2006, 89, 0);
@@ -113,6 +109,9 @@ public class HideAndSeekCityGame extends Game implements Listener {
                 new Location(world, -1999, 90, -5), BlockFace.SOUTH);
         initializeGameRunnable();
         removeSpectateButton();
+        tauntItem = new ItemStackBuilder(Material.GOLD_NUGGET).setDisplayName("§r§e嘲讽").setLore("§r§5效果: 自己所在位置发出声音以及粒子效果，寻找时间减3秒", "§r§5CD: 15秒").setGameItemStackTag(gameUtils.getNamespacedKey(), new GameItemStackTag()).build();
+        soundItem = new ItemStackBuilder(Material.AMETHYST_SHARD).setDisplayName("§r§c发声").setLore("§r§5效果: 所有躲藏者发出声音", "§r§5CD: 30秒").setGameItemStackTag(gameUtils.getNamespacedKey(), new GameItemStackTag()).build();
+        seekerWeaponItem = new ItemStackBuilder(Material.DIAMOND_SWORD).setUnbreakable(true).setGameItemStackTag(gameUtils.getNamespacedKey(), new GameItemStackTag()).build();
         protocolManager = ProtocolLibrary.getProtocolManager();
         equipmentPacketListener = new PacketAdapter(
                 plugin,
