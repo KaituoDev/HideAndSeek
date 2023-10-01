@@ -9,7 +9,9 @@ import com.comphenix.protocol.wrappers.EnumWrappers;
 import com.comphenix.protocol.wrappers.Pair;
 import com.destroystokyo.paper.ParticleBuilder;
 import fun.kaituo.gameutils.Game;
+import fun.kaituo.gameutils.GameUtils;
 import fun.kaituo.gameutils.PlayerQuitData;
+import fun.kaituo.gameutils.utils.GameItemStackTag;
 import fun.kaituo.gameutils.utils.ItemStackBuilder;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -34,6 +36,9 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scoreboard.*;
 import org.bukkit.util.RayTraceResult;
+import org.bukkit.util.Transformation;
+import org.joml.AxisAngle4f;
+import org.joml.Vector3f;
 
 import java.time.Duration;
 import java.util.*;
@@ -42,7 +47,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @SuppressWarnings("ConstantConditions")
 public class HideAndSeekCityGame extends Game implements Listener {
 
-    private static final HideAndSeekCityGame instance = new HideAndSeekCityGame((HideAndSeekCity) Bukkit.getPluginManager().getPlugin("HideAndSeek"));
+    private static final HideAndSeekCityGame instance = new HideAndSeekCityGame((HideAndSeekCity) Bukkit.getPluginManager().getPlugin("HideAndSeekCity"));
 
     private final ArrayList<Player> seekers;
     private final ArrayList<Player> hiders;
@@ -51,7 +56,6 @@ public class HideAndSeekCityGame extends Game implements Listener {
     private final HashMap<UUID, Boolean> disguised;
     private final HashMap<UUID, Location> hiderPreviousLocations;
 
-    private final World world;
     private final Scoreboard mainScoreboard;
     private final Scoreboard gameScoreboard;
     private final Objective mainObjective;
@@ -95,16 +99,15 @@ public class HideAndSeekCityGame extends Game implements Listener {
         playersTeam.setOption(Team.Option.NAME_TAG_VISIBILITY, Team.OptionStatus.NEVER);
         playersTeam.setCanSeeFriendlyInvisibles(false);
         playersTeam.setAllowFriendlyFire(true);
-        tauntItem = new ItemStackBuilder(Material.GOLD_NUGGET).setDisplayName("§r§e嘲讽").setLore("§r§5效果: 自己所在位置发出声音以及粒子效果，寻找时间减3秒", "§r§5CD: 15秒").build();
-        soundItem = new ItemStackBuilder(Material.AMETHYST_SHARD).setDisplayName("§r§c发声").setLore("§r§5效果: 所有躲藏者发出声音", "§r§5CD: 30秒").build();
-        seekerWeaponItem = new ItemStackBuilder(Material.DIAMOND_SWORD).setUnbreakable(true).build();
-        world = plugin.world;
+        tauntItem = new ItemStackBuilder(Material.GOLD_NUGGET).setDisplayName("§r§e嘲讽").setLore("§r§5效果: 自己所在位置发出声音以及粒子效果，寻找时间减3秒", "§r§5CD: 15秒").setGameItemStackTag(gameUtils.getNamespacedKey(), new GameItemStackTag()).build();
+        soundItem = new ItemStackBuilder(Material.AMETHYST_SHARD).setDisplayName("§r§c发声").setLore("§r§5效果: 所有躲藏者发出声音", "§r§5CD: 30秒").setGameItemStackTag(gameUtils.getNamespacedKey(), new GameItemStackTag()).build();
+        seekerWeaponItem = new ItemStackBuilder(Material.DIAMOND_SWORD).setUnbreakable(true).setGameItemStackTag(gameUtils.getNamespacedKey(), new GameItemStackTag()).build();
         hiderStartLocation = new Location(world, -2036.5, 57.0, -20.5);
         seekerStartLocation = new Location(world, -2021.5, 64.0, 21.5);
         gameTimeSignLocation = new Location(world, -2006, 89, 0);
         hubTeleportLocation = new Location(world, -2000, 89, 0);
         running = false;
-        initializeGame(plugin, "HideAndSeek", "§b方块捉迷藏",
+        initializeGame(plugin, "HideAndSeekCity", "§b方块捉迷藏-城市",
                 new Location(world, -1998.5, 92.0, 0.5));
         initializeButtons(new Location(world, -2006, 90, 1), BlockFace.EAST,
                 new Location(world, -1999, 90, -5), BlockFace.SOUTH);
@@ -197,7 +200,8 @@ public class HideAndSeekCityGame extends Game implements Listener {
                     p.teleport(hiderStartLocation);
                     hiderPreviousLocations.put(p.getUniqueId(), hiderStartLocation);
                     disguised.put(p.getUniqueId(), false);
-                    p.addPotionEffect(new PotionEffect(PotionEffectType.DAMAGE_RESISTANCE, 60 * 20, 4));
+                    p.addPotionEffect(new PotionEffect(PotionEffectType.DAMAGE_RESISTANCE, PotionEffect.INFINITE_DURATION, 4));
+                    p.setBedSpawnLocation(hiderStartLocation, true);
                 }
                 protocolManager.addPacketListener(equipmentPacketListener);
                 running = true;
@@ -243,21 +247,18 @@ public class HideAndSeekCityGame extends Game implements Listener {
                 }
                 for (Player p: hiders) {
                     p.getInventory().addItem(tauntItem);
+                    p.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, PotionEffect.INFINITE_DURATION, 1, false, false));
                 }
                 for (Player p: seekers) {
                     p.teleport(hiderStartLocation);
                     p.getInventory().addItem(soundItem);
+                    p.getInventory().addItem(seekerWeaponItem);
                 }
                 Bukkit.getScheduler().cancelTask(graceCountdownTaskId);
                 mainObjective.getScore("准备躲藏时间").resetScore();
             }, 65 * 20L);
             gameMainTaskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, () -> {
-                for (Player p: seekers) {
-                    if (!p.getInventory().contains(Material.DIAMOND_SWORD, 1))
-                        p.getInventory().addItem(seekerWeaponItem);
-                }
                 for (Player p: hiders) {
-                    p.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 5, 1, false, false));
                     UUID playerId = p.getUniqueId();
                     Location playerLoc = p.getLocation();
                     Score sneakTime = sneakTimeObjective.getScore(p.getName());
@@ -290,8 +291,9 @@ public class HideAndSeekCityGame extends Game implements Listener {
                             case 100 -> {
                                 p.sendActionBar(Component.text("⏺⏺⏺⏺⏺", NamedTextColor.GREEN));
                                 p.playSound(playerLoc, Sound.BLOCK_NOTE_BLOCK_BASEDRUM, 1F, 2F);
-                                getFakeBlock(disguiseFakeBlocks.get(playerId)).remove();
-                                disguiseFakeBlocks.remove(playerId);
+                                BlockDisplay fakeBlock = getFakeBlock(disguiseFakeBlocks.get(playerId));
+                                fakeBlock.teleport(playerLoc.getBlock().getLocation());
+                                fakeBlock.setTransformation(new Transformation(new Vector3f(0, 0, 0), new AxisAngle4f(0, 0, 0, 0), new Vector3f(0.999f, 0.999f, 0.999f), new AxisAngle4f(0, 0, 0, 0)));
                                 disguised.put(playerId, true);
                             }
                         }
@@ -325,13 +327,13 @@ public class HideAndSeekCityGame extends Game implements Listener {
                     BlockDisplay fakeBlock = getFakeBlock(disguiseFakeBlocks.get(playerId));
                     if (!disguised.get(playerId)) {
                         if (disguiseFakeBlocks.containsKey(playerId) && fakeBlock != null) {
-                            fakeBlock.teleport(playerLoc);
+                            fakeBlock.teleport(removePitchYaw(playerLoc));
                         } else {
                             spawnDisguiseFakeBlock(p);
                         }
                     }
                 }
-            }, 5 * 20L, 5);
+            }, 5 * 20L, 1);
             taskIds.add(gameFakeBlockTaskId);
             gameCountdown = new AtomicInteger(getGameTimeMinutesFromSign(gameTimeSignLocation) * 60);
             gameCountdownTaskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, () -> {
@@ -506,6 +508,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
                 )
         );
         disguised.put(p.getUniqueId(), false);
+        getFakeBlock(disguiseFakeBlocks.get(p.getUniqueId())).setTransformation(new Transformation(new Vector3f(0, 0, 0), new AxisAngle4f(0, 0, 0, 0), new Vector3f(0.999f, 0.999f, 0.999f), new AxisAngle4f(0, 0, 0, 0)));
     }
 
     @EventHandler
@@ -555,5 +558,9 @@ public class HideAndSeekCityGame extends Game implements Listener {
         endGame();
         mainObjective.unregister();
         sneakTimeObjective.unregister();
+    }
+
+    private Location removePitchYaw(Location location) {
+        return new Location(world, location.getX(), location.getY(), location.getZ());
     }
 }

@@ -25,15 +25,16 @@ public class HideAndSeekCity extends JavaPlugin implements Listener {
     }
 
     public void onEnable() {
-        players = new ArrayList<>();
-        Bukkit.getPluginManager().registerEvents(this, this);
-        Bukkit.getPluginManager().registerEvents(getGameInstance(), this);
-
         gameUtils = (GameUtils) Bukkit.getPluginManager().getPlugin("GameUtils");
         if (gameUtils == null) {
             getLogger().severe("No GameUtils instance found.");
             return;
         }
+
+        players = new ArrayList<>();
+        Bukkit.getPluginManager().registerEvents(this, this);
+        Bukkit.getPluginManager().registerEvents(getGameInstance(), this);
+
         gameUtils.registerGame(getGameInstance());
         world = gameUtils.getWorld();
     }
