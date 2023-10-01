@@ -446,11 +446,20 @@ public class HideAndSeekCityGame extends Game implements Listener {
         if (event.getAction() == Action.RIGHT_CLICK_BLOCK &&
                 blockLocationEqual(event.getClickedBlock().getLocation(), gameTimeSignLocation) &&
                 !running) {
+            Player p = event.getPlayer();
             int gameTimeMinutes = getGameTimeMinutesFromSign(gameTimeSignLocation);
-            if (gameTimeMinutes < 10) {
-                gameTimeMinutes++;
+            if (p.isSneaking()) {
+                if (gameTimeMinutes > 1) {
+                    gameTimeMinutes--;
+                } else {
+                    gameTimeMinutes = 10;
+                }
             } else {
-                gameTimeMinutes = 1;
+                if (gameTimeMinutes < 10) {
+                    gameTimeMinutes++;
+                } else {
+                    gameTimeMinutes = 1;
+                }
             }
             Sign sign = (Sign) gameTimeSignLocation.getBlock().getState();
             sign.getSide(Side.FRONT).line(0, Component.text("寻找时间为 " + gameTimeMinutes + " 分钟"));
