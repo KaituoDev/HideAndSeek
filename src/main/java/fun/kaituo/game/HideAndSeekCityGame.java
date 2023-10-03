@@ -292,8 +292,8 @@ public class HideAndSeekCityGame extends Game implements Listener {
                                 p.sendActionBar(Component.text("⏺⏺⏺⏺⏺", NamedTextColor.GREEN));
                                 p.playSound(playerLoc, Sound.BLOCK_NOTE_BLOCK_BASEDRUM, 1F, 2F);
                                 BlockDisplay fakeBlock = getFakeBlock(disguiseFakeBlocks.get(playerId));
-                                fakeBlock.teleport(playerLoc.getBlock().getLocation());
-                                fakeBlock.setTransformation(new Transformation(new Vector3f(0, 0, 0), new AxisAngle4f(0, 0, 0, 0), new Vector3f(0.999f, 0.999f, 0.999f), new AxisAngle4f(0, 0, 0, 0)));
+                                fakeBlock.teleport(offsetLocation(playerLoc.getBlock().getLocation(), -0.498, 0, -0.498));
+                                fakeBlock.setTransformation(new Transformation(new Vector3f(0, 0, 0), new AxisAngle4f(0, 0, 0, 0), new Vector3f(0.9975f, 0.9975f, 0.9975f), new AxisAngle4f(0, 0, 0, 0)));
                                 disguised.put(playerId, true);
                             }
                         }
@@ -327,7 +327,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
                     BlockDisplay fakeBlock = getFakeBlock(disguiseFakeBlocks.get(playerId));
                     if (!disguised.get(playerId)) {
                         if (disguiseFakeBlocks.containsKey(playerId) && fakeBlock != null) {
-                            fakeBlock.teleport(removePitchYaw(playerLoc));
+                            fakeBlock.teleport(offsetLocation(removePitchYaw(playerLoc), -0.5, 0, -0.5));
                         } else {
                             spawnDisguiseFakeBlock(p);
                         }
@@ -492,6 +492,8 @@ public class HideAndSeekCityGame extends Game implements Listener {
             if (i.equals(tauntItem) && hiders.contains(p)) {
                 world.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BELL, 0.4F, 1.0F);
                 new ParticleBuilder(Particle.NOTE).location(p.getEyeLocation()).count(1).allPlayers().force(true).spawn();
+                getFakeBlock(p.getUniqueId()).setGlowing(true);
+                taskIds.add(Bukkit.getScheduler().runTaskLater(plugin, () -> getFakeBlock(p.getUniqueId()).setGlowing(false), 3 * 20L).getTaskId());
                 int countdownNow = gameCountdown.get();
                 if (countdownNow > 0) gameCountdown.set(countdownNow < countdownNow ? 0 : countdownNow - 3);
                 p.getInventory().remove(tauntItem);
@@ -530,6 +532,8 @@ public class HideAndSeekCityGame extends Game implements Listener {
         playersTeam.removePlayer(p);
         seekers.add(p);
         hiders.remove(p);
+        getFakeBlock(disguiseFakeBlocks.get(p.getUniqueId())).remove();
+        p.getInventory().addItem(seekerWeaponItem);
     }
 
     private boolean blockLocationEqual(Location l1, Location l2) {
@@ -572,5 +576,10 @@ public class HideAndSeekCityGame extends Game implements Listener {
 
     private Location removePitchYaw(Location location) {
         return new Location(world, location.getX(), location.getY(), location.getZ());
+    }
+
+    @SuppressWarnings("SameParameterValue")
+    private Location offsetLocation(Location baseLocation, double dx, double dy, double dz) {
+        return new Location(baseLocation.getWorld(), baseLocation.getX() + dx, baseLocation.getY() + dy, baseLocation.getZ() + dz);
     }
 }
