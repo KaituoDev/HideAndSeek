@@ -199,7 +199,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
                     p.teleport(hiderStartLocation);
                     hiderPreviousLocations.put(p.getUniqueId(), hiderStartLocation);
                     disguised.put(p.getUniqueId(), false);
-                    p.addPotionEffect(new PotionEffect(PotionEffectType.DAMAGE_RESISTANCE, PotionEffect.INFINITE_DURATION, 4));
+                    p.addPotionEffect(new PotionEffect(PotionEffectType.DAMAGE_RESISTANCE, 5 * 20, 4));
                     p.setBedSpawnLocation(hiderStartLocation, true);
                 }
                 protocolManager.addPacketListener(equipmentPacketListener);
@@ -249,6 +249,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
                     p.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, PotionEffect.INFINITE_DURATION, 1, false, false));
                 }
                 for (Player p: seekers) {
+                    p.addPotionEffect(new PotionEffect(PotionEffectType.DAMAGE_RESISTANCE, PotionEffect.INFINITE_DURATION, 4));
                     p.teleport(hiderStartLocation);
                     p.getInventory().addItem(soundItem);
                     p.getInventory().addItem(seekerWeaponItem);
@@ -369,6 +370,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
             spawnFireworks(p);
             p.getInventory().clear();
             p.setScoreboard(mainScoreboard);
+            p.clearActivePotionEffects();
         }
         seekers.forEach(p -> hiders.forEach(p1 -> p.showPlayer(plugin, p1)));
         disguiseFakeBlocks.forEach((pid, bid) -> getFakeBlock(bid).remove());
