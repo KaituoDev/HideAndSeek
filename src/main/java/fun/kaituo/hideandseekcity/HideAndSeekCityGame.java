@@ -1,4 +1,4 @@
-package fun.kaituo.game;
+package fun.kaituo.hideandseekcity;
 
 import com.comphenix.protocol.PacketType;
 import com.comphenix.protocol.ProtocolLibrary;
@@ -18,7 +18,6 @@ import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.title.Title;
 import net.kyori.adventure.title.TitlePart;
 import org.bukkit.*;
-import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.Sign;
 import org.bukkit.block.sign.Side;
@@ -61,6 +60,8 @@ public class HideAndSeekCityGame extends Game implements Listener {
     private final Scoreboard gameScoreboard;
     private final Objective mainObjective;
     private final Objective sneakTimeObjective;
+    private final Team mainSeekersTeam;
+    private final Team mainHidersTeam;
     private final Team playersTeam;
 
     // CONSTANTS
@@ -102,6 +103,8 @@ public class HideAndSeekCityGame extends Game implements Listener {
         playersTeam.setOption(Team.Option.NAME_TAG_VISIBILITY, Team.OptionStatus.NEVER);
         playersTeam.setCanSeeFriendlyInvisibles(false);
         playersTeam.setAllowFriendlyFire(true);
+        mainSeekersTeam = mainScoreboard.getTeam("hnk1seekers");
+        mainHidersTeam = mainScoreboard.getTeam("hnk1hiders");
 
         hiderStartLocation = new Location(world, -2036.5, 57.0, -20.5);
         seekerStartLocation = new Location(world, -2021.5, 64.0, 21.5);
@@ -162,18 +165,21 @@ public class HideAndSeekCityGame extends Game implements Listener {
             // add players and assign init roles
             players.addAll(getPlayersNearHub(12.5, 3.0, 10.5));
             seekers.addAll(
-                    mainScoreboard.getTeam("hnk1seekers").getEntries().stream()
+                    mainSeekersTeam.getEntries().stream()
                             .map(Bukkit::getPlayer)
                             .filter(Objects::nonNull)
                             .toList()
             );
             hiders.addAll(
-                    mainScoreboard.getTeam("hnk1hiders").getEntries().stream()
+                    mainHidersTeam.getEntries().stream()
                             .map(Bukkit::getPlayer)
                             .filter(Objects::nonNull)
                             .toList()
             );
             hiders.addAll(players.stream().filter(p -> !seekers.contains(p) && !hiders.contains(p)).toList());
+
+            mainSeekersTeam.removeEntries(mainSeekersTeam.getEntries());
+            mainHidersTeam.removeEntries(mainHidersTeam.getEntries());
 
             // check if there's enough players
             if (seekers.isEmpty() || hiders.isEmpty()) {
@@ -195,6 +201,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
                 hiderData.disguised = false;
                 hiderData.disguiseMaterial = Material.SPRUCE_PLANKS;
                 hiderData.fakeBlockDisplayId = null;    // will be modified later
+                hiderData.replacedBlockMaterial = null; // will be modified later
                 hiderDataMap.put(hiderId, hiderData);
             }
             players.forEach(playersTeam::addPlayer);
@@ -326,6 +333,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
                                 hider.sendActionBar(Component.text("⏺⏺⏺⏺⏺", NamedTextColor.GREEN));
                                 hider.playSound(hiderLoc, Sound.BLOCK_NOTE_BLOCK_BASEDRUM, 1F, 2F);
                                 hiderData.disguised = true;
+                                hiderData.replacedBlockMaterial = hider.getLocation().getBlock().getType();
                             }
                         }
                     } else {
@@ -387,6 +395,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
         // clean scoreboards
         mainObjective.getScore("剩余时间").resetScore();
         mainObjective.getScore("剩余躲藏者").resetScore();
+        playersTeam.removeEntries(playersTeam.getEntries());
 
         running = false;
 
@@ -413,10 +422,11 @@ public class HideAndSeekCityGame extends Game implements Listener {
             p.getInventory().clear();
             p.setScoreboard(mainScoreboard);
             p.clearActivePotionEffects();
+            p.addPotionEffect(new PotionEffect(PotionEffectType.INSTANT_HEALTH, 1, 20));
+            p.addPotionEffect(new PotionEffect(PotionEffectType.SATURATION, 1, 20));
         }
 
         // show hiders
-        seekers.forEach(p -> hiders.forEach(p1 -> p.showPlayer(plugin, p1)));
         hiders.forEach(p -> {
             BlockDisplay fakeBlockDisplay = getFakeBlockDisplay(p.getUniqueId());
             if (fakeBlockDisplay != null) {
@@ -439,13 +449,14 @@ public class HideAndSeekCityGame extends Game implements Listener {
         seekers.clear();
         hiders.clear();
         hiderDataMap.clear();
+        List<Player> playersCopy = new ArrayList<>(players);
+        players.clear();
         protocolManager.removePacketListener(equipmentPacketListener);
         if (!disabling) {
             Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                for (Player p : players) {
+                for (Player p : playersCopy) {
                     p.teleport(hubTeleportLocation);
                 }
-                players.clear();
             }, 3 * 20L);
         }
     }
@@ -457,6 +468,8 @@ public class HideAndSeekCityGame extends Game implements Listener {
         quitData.getData().put("role", hiders.contains(p) ? "hider": "seeker");
         gameUtils.setPlayerQuitData(p.getUniqueId(), quitData);
         playersTeam.removePlayer(p);
+        mainHidersTeam.removePlayer(p);
+        mainSeekersTeam.removePlayer(p);
         players.remove(p);
         hiders.remove(p);
         seekers.remove(p);
@@ -538,14 +551,11 @@ public class HideAndSeekCityGame extends Game implements Listener {
             // seeker attack logic (because hiders are, well, hidden!)
             Player seeker = event.getPlayer();
             if (!seekers.contains(seeker)) return;
-            RayTraceResult result = world.rayTrace(seeker.getEyeLocation(), seeker.getEyeLocation().getDirection(), 3, FluidCollisionMode.NEVER, true, 0, e1 -> !e1.getUniqueId().equals(seeker.getUniqueId()));
+            RayTraceResult result = world.rayTraceEntities(seeker.getEyeLocation(), seeker.getEyeLocation().getDirection(), 3, e -> !e.getUniqueId().equals(seeker.getUniqueId()));
             if (result == null) return;
-            Block hitBlock = result.getHitBlock();
             Entity hitEntity = result.getHitEntity();
             Player hider;
-            if (hitBlock != null) {
-                hider = hiders.stream().filter(oneHider -> blockLocationEqual(oneHider.getLocation(), hitBlock.getLocation())).findFirst().orElse(null);
-            } else if (hitEntity != null) {
+            if (hitEntity != null) {
                 if (hitEntity instanceof Player hitPlayer) {
                     if (!hiders.contains(hitPlayer)) return;
                     hider = hitPlayer;
@@ -611,10 +621,12 @@ public class HideAndSeekCityGame extends Game implements Listener {
         HiderData hiderData = hiderDataMap.get(p.getUniqueId());
         if (!hiderData.disguised) return;
         if (getDistance(event.getFrom(), event.getTo()) <= 0.1) return;
+        Material originalMaterial;
+        originalMaterial = Objects.requireNonNullElse(hiderData.replacedBlockMaterial, Material.AIR);
         players.forEach(
                 p1 -> p1.sendBlockChange(
                         p.getLocation().getBlock().getLocation(),
-                        Material.AIR.createBlockData()
+                        originalMaterial.createBlockData()
                 )
         );
         hiderData.disguised = false;
@@ -634,7 +646,6 @@ public class HideAndSeekCityGame extends Game implements Listener {
             fakeBlockDisplay.remove();
         }
         p.getInventory().clear();
-        playersTeam.removePlayer(p);
         seekers.add(p);
         hiders.remove(p);
         p.getInventory().addItem(seekerWeaponItem);
@@ -691,6 +702,9 @@ public class HideAndSeekCityGame extends Game implements Listener {
         endGame(true);
         mainObjective.unregister();
         sneakTimeObjective.unregister();
+        playersTeam.unregister();
+        mainSeekersTeam.removeEntries(mainSeekersTeam.getEntries());
+        mainHidersTeam.removeEntries(mainHidersTeam.getEntries());
     }
 
     private Location removePitchYaw(Location location) {
@@ -707,5 +721,6 @@ public class HideAndSeekCityGame extends Game implements Listener {
         UUID fakeBlockDisplayId;
         boolean disguised;
         Location previousLocation;
+        Material replacedBlockMaterial;
     }
 }

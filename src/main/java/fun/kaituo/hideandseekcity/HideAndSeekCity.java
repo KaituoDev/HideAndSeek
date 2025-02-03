@@ -1,9 +1,7 @@
-package fun.kaituo.game;
+package fun.kaituo.hideandseekcity;
 
 import fun.kaituo.gameutils.GameUtils;
-import fun.kaituo.gameutils.event.PlayerChangeGameEvent;
 import org.bukkit.Bukkit;
-import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.HandlerList;
@@ -42,10 +40,9 @@ public class HideAndSeekCity extends JavaPlugin implements Listener {
     public void onDisable() {
         Bukkit.getScheduler().cancelTasks(this);
         HandlerList.unregisterAll((Plugin) this);
-        if (!players.isEmpty()) {
-            for (Player p : players) {
-                p.teleport(new Location(world, 0.5, 89.0, 0.5));
-                Bukkit.getPluginManager().callEvent(new PlayerChangeGameEvent(p, getGameInstance(), null));
+        for (Player p: Bukkit.getOnlinePlayers()) {
+            if (gameUtils.getPlayerGame(p) == getGameInstance()) {
+                Bukkit.dispatchCommand(p, "join Lobby");
             }
         }
         getGameInstance().onDisable();
