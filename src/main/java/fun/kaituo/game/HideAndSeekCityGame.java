@@ -4,7 +4,6 @@ import com.comphenix.protocol.PacketType;
 import com.comphenix.protocol.ProtocolLibrary;
 import com.comphenix.protocol.ProtocolManager;
 import com.comphenix.protocol.events.*;
-import com.comphenix.protocol.reflect.StructureModifier;
 import com.comphenix.protocol.wrappers.EnumWrappers;
 import com.comphenix.protocol.wrappers.Pair;
 import com.destroystokyo.paper.ParticleBuilder;
@@ -28,8 +27,10 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
@@ -48,19 +49,21 @@ public class HideAndSeekCityGame extends Game implements Listener {
 
     private static final HideAndSeekCityGame instance = new HideAndSeekCityGame((HideAndSeekCity) Bukkit.getPluginManager().getPlugin("HideAndSeekCity"));
 
+    // GAME VARIABLES
+    // player maps
     private final ArrayList<Player> seekers;
     private final ArrayList<Player> hiders;
-    private final HashMap<UUID, Material> disguiseMaterials;
-    private final HashMap<UUID, UUID> disguiseFakeBlocks;
-    private final HashMap<UUID, Boolean> disguised;
-    private final HashMap<UUID, Location> hiderPreviousLocations;
 
+    private final HashMap<UUID, HiderData> hiderDataMap;
+
+    // scoreboards
     private final Scoreboard mainScoreboard;
     private final Scoreboard gameScoreboard;
     private final Objective mainObjective;
     private final Objective sneakTimeObjective;
     private final Team playersTeam;
 
+    // CONSTANTS
     private final Location hiderStartLocation;
     private final Location seekerStartLocation;
     private final Location gameTimeSignLocation;
@@ -69,25 +72,26 @@ public class HideAndSeekCityGame extends Game implements Listener {
     private final ProtocolManager protocolManager;
     private final PacketListener equipmentPacketListener;
 
+    private final ItemStack[] disguiseBlockItems;
     private final ItemStack tauntItem;
     private final ItemStack soundItem;
     private final ItemStack seekerWeaponItem;
 
     private int gameMainTaskId;
-    private int gameCountdownTaskId;
-    private int gameFakeBlockTaskId;
-    private AtomicInteger gameCountdown;
+    private int catchingCountdownTaskId;
+    private int fakeBlockDisplayTaskId;
+    private AtomicInteger catchingCountdown;
     private boolean running;
 
     private HideAndSeekCityGame(HideAndSeekCity plugin) {
         this.plugin = plugin;
+
         players = plugin.players;
         seekers = new ArrayList<>();
         hiders = new ArrayList<>();
-        disguiseMaterials = new HashMap<>();
-        disguiseFakeBlocks = new HashMap<>();
-        disguised = new HashMap<>();
-        hiderPreviousLocations = new HashMap<>();
+
+        hiderDataMap = new HashMap<>();
+
         mainScoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
         gameScoreboard = Bukkit.getScoreboardManager().getNewScoreboard();
         mainObjective = gameScoreboard.registerNewObjective("game_main", Criteria.DUMMY, Component.text("方块捉迷藏", NamedTextColor.AQUA));
@@ -98,37 +102,52 @@ public class HideAndSeekCityGame extends Game implements Listener {
         playersTeam.setOption(Team.Option.NAME_TAG_VISIBILITY, Team.OptionStatus.NEVER);
         playersTeam.setCanSeeFriendlyInvisibles(false);
         playersTeam.setAllowFriendlyFire(true);
+
         hiderStartLocation = new Location(world, -2036.5, 57.0, -20.5);
         seekerStartLocation = new Location(world, -2021.5, 64.0, 21.5);
         gameTimeSignLocation = new Location(world, -2006, 89, 0);
         hubTeleportLocation = new Location(world, -2000, 89, 0);
+
         running = false;
+
         initializeGame(plugin, "HideAndSeekCity", "§b方块捉迷藏-城市",
                 new Location(world, -1998.5, 92.0, 0.5));
         initializeButtons(new Location(world, -2006, 90, 1), BlockFace.EAST,
                 new Location(world, -1999, 90, -5), BlockFace.SOUTH);
         initializeGameRunnable();
         removeSpectateButton();
+
+        disguiseBlockItems = new ItemStack[] {
+                new ItemStack(Material.SPRUCE_PLANKS),
+                new ItemStack(Material.ANVIL),
+                new ItemStack(Material.BEACON),
+                new ItemStack(Material.DARK_PRISMARINE),
+                new ItemStack(Material.OAK_LEAVES)
+        };
         tauntItem = new ItemStackBuilder(Material.GOLD_NUGGET).setDisplayName("§r§e嘲讽").setLore("§r§5效果: 自己所在位置发出声音以及粒子效果，寻找时间减3秒", "§r§5CD: 15秒").setGameItemStackTag(gameUtils.getNamespacedKey(), new GameItemStackTag()).build();
         soundItem = new ItemStackBuilder(Material.AMETHYST_SHARD).setDisplayName("§r§c发声").setLore("§r§5效果: 所有躲藏者发出声音", "§r§5CD: 30秒").setGameItemStackTag(gameUtils.getNamespacedKey(), new GameItemStackTag()).build();
         seekerWeaponItem = new ItemStackBuilder(Material.DIAMOND_SWORD).setUnbreakable(true).setGameItemStackTag(gameUtils.getNamespacedKey(), new GameItemStackTag()).build();
+
         protocolManager = ProtocolLibrary.getProtocolManager();
         equipmentPacketListener = new PacketAdapter(
                 plugin,
                 ListenerPriority.HIGHEST,
-                PacketType.Play.Server.NAMED_ENTITY_SPAWN
+                PacketType.Play.Server.ENTITY_EQUIPMENT
         ) {
             @Override
             public void onPacketSending(PacketEvent event) {
-                if (!event.getPacket().getType().equals(PacketType.Play.Server.ENTITY_EQUIPMENT)) return;
-                if (!seekers.contains(event.getPlayer())) return;
-                Entity e = event.getPacket().getEntityModifier(world).read(0);
-                if (!(e instanceof Player p)) return;
-                if (!hiders.contains(p)) return;
-                PacketContainer container = event.getPacket();
-                StructureModifier<List<Pair<EnumWrappers.ItemSlot, ItemStack>>> modifier = container.getSlotStackPairLists();
-                EnumWrappers.ItemSlot slot = modifier.read(0).get(0).getFirst();
-                modifier.write(0, List.of(new Pair<>(slot, new ItemStack(Material.AIR))));
+                PacketContainer packet = event.getPacket();
+                if (!seekers.contains(event.getPlayer())) return;  // not a seeker receiving this packet
+                int entityId = packet.getIntegers().read(0);
+                List<Integer> hiderIds = hiders.stream().map(Entity::getEntityId).toList();
+                if (!hiderIds.contains(entityId)) return;
+                packet.getSlotStackPairLists().modify(0, equipments -> {
+                    for (Pair<EnumWrappers.ItemSlot, ItemStack> pair : equipments) {
+                        ItemStack itemStack = new ItemStack(Material.AIR);
+                        pair.setSecond(itemStack);
+                    }
+                    return equipments;
+                });
             }
         };
     }
@@ -140,79 +159,83 @@ public class HideAndSeekCityGame extends Game implements Listener {
 
     protected void initializeGameRunnable() {
         gameRunnable = () -> {
+            // add players and assign init roles
             players.addAll(getPlayersNearHub(12.5, 3.0, 10.5));
             seekers.addAll(
-                    mainScoreboard.getTeam("hnkseekers").getEntries().stream().map(
-                            name -> Bukkit.getOnlinePlayers().stream().filter(
-                                    p -> p.getName().equals(name)
-                            ).filter(p -> players.contains(p))
-                                    .findFirst()
-                                    .orElse(null)
-                    ).filter(Objects::nonNull).toList()
+                    mainScoreboard.getTeam("hnk1seekers").getEntries().stream()
+                            .map(Bukkit::getPlayer)
+                            .filter(Objects::nonNull)
+                            .toList()
             );
             hiders.addAll(
-                    mainScoreboard.getTeam("hnkhiders").getEntries().stream().map(
-                            name -> Bukkit.getOnlinePlayers().stream().filter(
-                                            p -> p.getName().equals(name)
-                                    ).filter(p -> players.contains(p))
-                                    .findFirst()
-                                    .orElse(null)
-                    ).filter(Objects::nonNull).toList()
+                    mainScoreboard.getTeam("hnk1hiders").getEntries().stream()
+                            .map(Bukkit::getPlayer)
+                            .filter(Objects::nonNull)
+                            .toList()
             );
             hiders.addAll(players.stream().filter(p -> !seekers.contains(p) && !hiders.contains(p)).toList());
-            if (seekers.size() < 1 || hiders.size() < 1) {
+
+            // check if there's enough players
+            if (seekers.isEmpty() || hiders.isEmpty()) {
                 players.forEach(p -> p.sendMessage(Component.text("人数不足，无法开始游戏！", NamedTextColor.RED)));
                 seekers.clear();
                 hiders.clear();
                 players.clear();
                 return;
             }
+
             gameUUID = UUID.randomUUID();
-            for (Player p: hiders) {
-                Set<String> tags = p.getScoreboardTags();
-                UUID uuid = p.getUniqueId();
-                if (tags.contains("hnk1_spruce_planks")) {
-                    disguiseMaterials.put(uuid, Material.SPRUCE_PLANKS);
-                } else if (tags.contains("hnk1_anvil")) {
-                    disguiseMaterials.put(uuid, Material.ANVIL);
-                } else if (tags.contains("hnk1_beacon")) {
-                    disguiseMaterials.put(uuid, Material.BEACON);
-                } else if (tags.contains("hnk1_dark_prismarine")) {
-                    disguiseMaterials.put(uuid, Material.DARK_PRISMARINE);
-                } else if (tags.contains("hnk1_oak_leaves")) {
-                    disguiseMaterials.put(uuid, Material.OAK_LEAVES);
-                } else {
-                    disguiseMaterials.put(uuid, Material.SPRUCE_PLANKS);
-                }
-                p.setBedSpawnLocation(hiderStartLocation, true);
+
+            // ======== BEFORE HIDING =======
+            for (Player hider: hiders) {
+                // init hider data
+                UUID hiderId = hider.getUniqueId();
+                HiderData hiderData = new HiderData();
+                hiderData.previousLocation = hiderStartLocation;
+                hiderData.disguised = false;
+                hiderData.disguiseMaterial = Material.SPRUCE_PLANKS;
+                hiderData.fakeBlockDisplayId = null;    // will be modified later
+                hiderDataMap.put(hiderId, hiderData);
             }
             players.forEach(playersTeam::addPlayer);
-            startCountdown(5);
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            startCountdown(5);  // game start countdown
+
+            // ======== HIDING ========
+            taskIds.add(Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 for (Player p: players) {
                     p.setScoreboard(gameScoreboard);
                 }
-                for (Player p: seekers) {
-                    p.teleport(seekerStartLocation);
+                for (Player seeker: seekers) {
+                    seeker.teleport(seekerStartLocation);
+                    seeker.setRespawnLocation(seekerStartLocation, true);
                 }
-                for (Player p: hiders) {
-                    p.teleport(hiderStartLocation);
-                    hiderPreviousLocations.put(p.getUniqueId(), hiderStartLocation);
-                    disguised.put(p.getUniqueId(), false);
-                    p.addPotionEffect(new PotionEffect(PotionEffectType.DAMAGE_RESISTANCE, 5 * 20, 4));
-                    p.setBedSpawnLocation(hiderStartLocation, true);
+                for (Player hider: hiders) {
+                    hider.teleport(hiderStartLocation);
+                    hider.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, 5 * 20, 4));
+                    hider.setRespawnLocation(hiderStartLocation, true);
+                    Inventory inventory = hider.getInventory();
+                    int index = 2;
+                    for (ItemStack blockItem: disguiseBlockItems) {
+                        inventory.setItem(index, blockItem);
+                        index++;
+                    }
                 }
-                protocolManager.addPacketListener(equipmentPacketListener);
+                protocolManager.addPacketListener(equipmentPacketListener); // hiders fully invisible
                 running = true;
-            }, 5 * 20L);
+            }, 5 * 20L).getTaskId());
+            // hiding countdown
             AtomicInteger graceCountdown = new AtomicInteger(60);
             int graceCountdownTaskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, () -> {
                 mainObjective.getScore("准备躲藏时间").setScore(graceCountdown.get());
                 graceCountdown.getAndDecrement();
             }, 5 * 20L, 20L);
+            taskIds.add(graceCountdownTaskId);
+
+            // ======== BEFORE CATCHING ========
+            // before catching countdown
             for (int i = 5; i > 0; --i) {
                 int finalI = i;
-                Bukkit.getScheduler().runTaskLater(this.plugin, () -> {
+                taskIds.add(Bukkit.getScheduler().runTaskLater(this.plugin, () -> {
                     for (Player p: players) {
                         p.showTitle(
                                 Title.title(
@@ -227,13 +250,13 @@ public class HideAndSeekCityGame extends Game implements Listener {
                         );
                         p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_HARP, 1.0F, 1.0F);
                     }
-                }, (65 - i)  * 20L);
+                }, (65 - i)  * 20L).getTaskId());
             }
-            Bukkit.getScheduler().runTaskLater(this.plugin, () -> {
+            taskIds.add(Bukkit.getScheduler().runTaskLater(this.plugin, () -> {
                 for (Player p: players) {
                     p.showTitle(
                             Title.title(
-                                    Component.text("猎杀时刻！", NamedTextColor.YELLOW),
+                                    Component.text("开始追捕！", NamedTextColor.YELLOW),
                                     Component.empty(),
                                     Title.Times.times(
                                             Duration.ofMillis(2 * 50L),
@@ -244,113 +267,132 @@ public class HideAndSeekCityGame extends Game implements Listener {
                     );
                     p.playSound(p.getLocation(), Sound.ENTITY_ENDER_DRAGON_GROWL, 1.0F, 2.0F);
                 }
-                for (Player p: hiders) {
-                    p.getInventory().addItem(tauntItem);
-                    p.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, PotionEffect.INFINITE_DURATION, 1, false, false));
+
+                // player state update
+                for (Player hider: hiders) {
+                    hider.getInventory().setItem(0, tauntItem);
+                    hider.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, PotionEffect.INFINITE_DURATION, 1, false, false));
                 }
-                for (Player p: seekers) {
-                    p.addPotionEffect(new PotionEffect(PotionEffectType.DAMAGE_RESISTANCE, PotionEffect.INFINITE_DURATION, 4));
-                    p.teleport(hiderStartLocation);
-                    p.getInventory().addItem(soundItem);
-                    p.getInventory().addItem(seekerWeaponItem);
+                for (Player seeker: seekers) {
+                    seeker.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, PotionEffect.INFINITE_DURATION, 4));
+                    seeker.teleport(hiderStartLocation);
+                    seeker.setRespawnLocation(hiderStartLocation, true);
+                    seeker.getInventory().addItem(soundItem);
+                    seeker.getInventory().addItem(seekerWeaponItem);
                 }
+
+                // clean grace countdown
                 Bukkit.getScheduler().cancelTask(graceCountdownTaskId);
+                taskIds.remove((Object) graceCountdownTaskId);
                 mainObjective.getScore("准备躲藏时间").resetScore();
-            }, 65 * 20L);
+            }, 65 * 20L).getTaskId());
+
+            // ======== CATCHING ========
+            // game main task
             gameMainTaskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, () -> {
-                for (Player p: hiders) {
-                    UUID playerId = p.getUniqueId();
-                    Location playerLoc = p.getLocation();
-                    Score sneakTime = sneakTimeObjective.getScore(p.getName());
-                    if (p.isSneaking() && getDistance(playerLoc, hiderPreviousLocations.get(playerId)) <= 0.2 && !disguised.get(playerId)) {
+                // sneak for 5 sec to disguise
+                for (Player hider: hiders) {
+                    UUID hiderId = hider.getUniqueId();
+                    Location hiderLoc = hider.getLocation();
+                    HiderData hiderData = hiderDataMap.get(hiderId);
+                    Score sneakTime = sneakTimeObjective.getScore(hider.getName());
+                    if (hider.isSneaking() && getDistance(hiderLoc, hiderData.previousLocation) <= 0.2 && !hiderData.disguised) {
                         switch (sneakTime.getScore()) {
                             case 20 -> {
-                                p.sendActionBar(Component.text("⏺", NamedTextColor.RED)
+                                hider.sendActionBar(Component.text("⏺", NamedTextColor.RED)
                                         .append(Component.text("⏺⏺⏺⏺", NamedTextColor.GRAY))
                                 );
-                                p.playSound(playerLoc, Sound.BLOCK_NOTE_BLOCK_BASEDRUM, 1F, 0.8F);
+                                hider.playSound(hiderLoc, Sound.BLOCK_NOTE_BLOCK_BASEDRUM, 1F, 0.8F);
                             }
                             case 40 -> {
-                                p.sendActionBar(Component.text("⏺⏺", NamedTextColor.RED)
+                                hider.sendActionBar(Component.text("⏺⏺", NamedTextColor.RED)
                                         .append(Component.text("⏺⏺⏺", NamedTextColor.GRAY))
                                 );
-                                p.playSound(playerLoc, Sound.BLOCK_NOTE_BLOCK_BASEDRUM, 1F, 1.1F);
+                                hider.playSound(hiderLoc, Sound.BLOCK_NOTE_BLOCK_BASEDRUM, 1F, 1.1F);
                             }
                             case 60 -> {
-                                p.sendActionBar(Component.text("⏺⏺⏺", NamedTextColor.YELLOW)
+                                hider.sendActionBar(Component.text("⏺⏺⏺", NamedTextColor.YELLOW)
                                         .append(Component.text("⏺⏺", NamedTextColor.GRAY))
                                 );
-                                p.playSound(playerLoc, Sound.BLOCK_NOTE_BLOCK_BASEDRUM, 1F, 1.4F);
+                                hider.playSound(hiderLoc, Sound.BLOCK_NOTE_BLOCK_BASEDRUM, 1F, 1.4F);
                             }
                             case 80 -> {
-                                p.sendActionBar(Component.text("⏺⏺⏺⏺", NamedTextColor.YELLOW)
+                                hider.sendActionBar(Component.text("⏺⏺⏺⏺", NamedTextColor.YELLOW)
                                         .append(Component.text("⏺", NamedTextColor.GRAY))
                                 );
-                                p.playSound(playerLoc, Sound.BLOCK_NOTE_BLOCK_BASEDRUM, 1F, 1.7F);
+                                hider.playSound(hiderLoc, Sound.BLOCK_NOTE_BLOCK_BASEDRUM, 1F, 1.7F);
                             }
                             case 100 -> {
-                                p.sendActionBar(Component.text("⏺⏺⏺⏺⏺", NamedTextColor.GREEN));
-                                p.playSound(playerLoc, Sound.BLOCK_NOTE_BLOCK_BASEDRUM, 1F, 2F);
-                                BlockDisplay fakeBlock = getFakeBlock(disguiseFakeBlocks.get(playerId));
-                                fakeBlock.teleport(offsetLocation(playerLoc.getBlock().getLocation(), -0.498, 0, -0.498));
-                                fakeBlock.setTransformation(new Transformation(new Vector3f(0, 0, 0), new AxisAngle4f(0, 0, 0, 0), new Vector3f(0.9975f, 0.9975f, 0.9975f), new AxisAngle4f(0, 0, 0, 0)));
-                                disguised.put(playerId, true);
+                                hider.sendActionBar(Component.text("⏺⏺⏺⏺⏺", NamedTextColor.GREEN));
+                                hider.playSound(hiderLoc, Sound.BLOCK_NOTE_BLOCK_BASEDRUM, 1F, 2F);
+                                hiderData.disguised = true;
                             }
                         }
                     } else {
                         sneakTime.setScore(0);
                     }
-                    if (disguised.get(playerId)) {
-                        p.sendActionBar(Component.text("伪装中", Style.style(NamedTextColor.DARK_AQUA, TextDecoration.BOLD)));
+                    if (hiderData.disguised) {
+                        hider.sendActionBar(Component.text("伪装中", Style.style(NamedTextColor.DARK_AQUA, TextDecoration.BOLD)));
                         players.forEach(
                                 p1 -> {
-                                    if (!p1.getUniqueId().equals(playerId))
+                                    if (!p1.getUniqueId().equals(hiderId))
                                         p1.sendBlockChange(
-                                                playerLoc.getBlock().getLocation(),
-                                                disguiseMaterials.get(playerId).createBlockData()
+                                                hiderLoc.getBlock().getLocation(),
+                                                hiderData.disguiseMaterial.createBlockData()
                                         );
                                 }
                         );
                     }
-                    hiderPreviousLocations.put(playerId, playerLoc);
+                    hiderData.previousLocation = hiderLoc;
                 }
                 mainObjective.getScore("剩余躲藏者").setScore(hiders.size());
-                if (hiders.size() == 0 || gameCountdown.get() == 0) {
-                    endGame();
+                if (hiders.isEmpty() || catchingCountdown.get() == 0) {
+                    endGame(false);
                 }
             }, 5 * 20L, 1);
             taskIds.add(gameMainTaskId);
-            gameFakeBlockTaskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, () -> {
-                for (Player p: hiders) {
-                    UUID playerId = p.getUniqueId();
-                    Location playerLoc = p.getLocation();
-                    BlockDisplay fakeBlock = getFakeBlock(disguiseFakeBlocks.get(playerId));
-                    if (!disguised.get(playerId)) {
-                        if (disguiseFakeBlocks.containsKey(playerId) && fakeBlock != null) {
-                            fakeBlock.teleport(offsetLocation(removePitchYaw(playerLoc), -0.5, 0, -0.5));
-                        } else {
-                            spawnDisguiseFakeBlock(p);
-                        }
+            // create or teleport fake blocks
+            fakeBlockDisplayTaskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, () -> {
+                for (Player hider: hiders) {
+                    UUID hiderId = hider.getUniqueId();
+                    Location hiderLoc = hider.getLocation();
+                    HiderData hiderData = hiderDataMap.get(hiderId);
+                    BlockDisplay fakeBlockDisplay = getFakeBlockDisplay(hiderId);
+                    if (fakeBlockDisplay == null) {
+                        fakeBlockDisplay = spawnFakeBlockDisplay(hider);
+                        hiderData.fakeBlockDisplayId = fakeBlockDisplay.getUniqueId();
+                    }
+                    if (hiderData.disguised) {
+                        fakeBlockDisplay.teleport(offsetLocation(hiderLoc.getBlock().getLocation(), 0.00125, 0.00125, 0.00125));
+                        fakeBlockDisplay.setTransformation(new Transformation(new Vector3f(0, 0, 0), new AxisAngle4f(0, 0, 0, 0), new Vector3f(0.9975f, 0.9975f, 0.9975f), new AxisAngle4f(0, 0, 0, 0)));
+                    } else {
+                        fakeBlockDisplay.teleport(offsetLocation(removePitchYaw(hiderLoc), -0.5, 0, -0.5));
                     }
                 }
             }, 5 * 20L, 1);
-            taskIds.add(gameFakeBlockTaskId);
-            gameCountdown = new AtomicInteger(getGameTimeMinutesFromSign(gameTimeSignLocation) * 60);
-            gameCountdownTaskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, () -> {
-                mainObjective.getScore("剩余时间").setScore(gameCountdown.get());
-                gameCountdown.getAndDecrement();
+            taskIds.add(fakeBlockDisplayTaskId);
+            catchingCountdown = new AtomicInteger(getGameTimeMinutesFromSign(gameTimeSignLocation) * 60);
+            catchingCountdownTaskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, () -> {
+                mainObjective.getScore("剩余时间").setScore(catchingCountdown.get());
+                catchingCountdown.getAndDecrement();
             }, 65 * 20L, 20L);
-            taskIds.add(gameCountdownTaskId);
+            taskIds.add(catchingCountdownTaskId);
         };
     }
 
-    private void endGame() {
+    private void endGame(boolean disabling) {
+        // clean tasks
         cancelGameTasks();
+
+        // clean scoreboards
         mainObjective.getScore("剩余时间").resetScore();
         mainObjective.getScore("剩余躲藏者").resetScore();
+
         running = false;
+
+        // show win effects
         Component winMessage;
-        if (hiders.size() > 0) {
+        if (!hiders.isEmpty()) {
             winMessage = Component.text("躲藏者获胜！", NamedTextColor.GOLD);
         } else {
             winMessage = Component.text("搜寻者获胜！", NamedTextColor.GOLD);
@@ -372,20 +414,40 @@ public class HideAndSeekCityGame extends Game implements Listener {
             p.setScoreboard(mainScoreboard);
             p.clearActivePotionEffects();
         }
+
+        // show hiders
         seekers.forEach(p -> hiders.forEach(p1 -> p.showPlayer(plugin, p1)));
-        disguiseFakeBlocks.forEach((pid, bid) -> getFakeBlock(bid).remove());
+        hiders.forEach(p -> {
+            BlockDisplay fakeBlockDisplay = getFakeBlockDisplay(p.getUniqueId());
+            if (fakeBlockDisplay != null) {
+                fakeBlockDisplay.remove();
+            }
+        });
+        hiderDataMap.forEach((id, data) -> {
+            if (data.disguised) {
+                Player hider = Bukkit.getPlayer(id);
+                players.forEach(
+                        p1 -> p1.sendBlockChange(
+                                hider.getLocation().getBlock().getLocation(),
+                                Material.AIR.createBlockData()
+                        )
+                );
+            }
+        });
+
+        // clean player maps
         seekers.clear();
         hiders.clear();
-        disguised.clear();
-        disguiseMaterials.clear();
-        disguiseFakeBlocks.clear();
+        hiderDataMap.clear();
         protocolManager.removePacketListener(equipmentPacketListener);
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            for (Player p: players) {
-                p.teleport(hubTeleportLocation);
-            }
-            players.clear();
-        }, 3 * 20L);
+        if (!disabling) {
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                for (Player p : players) {
+                    p.teleport(hubTeleportLocation);
+                }
+                players.clear();
+            }, 3 * 20L);
+        }
     }
 
     @Override
@@ -429,7 +491,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
 
     @Override
     protected boolean join(Player p) {
-        p.setBedSpawnLocation(hubTeleportLocation, true);
+        p.setRespawnLocation(hubTeleportLocation, true);
         p.teleport(hubTeleportLocation);
         return true;
     }
@@ -440,7 +502,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
         for (Player p : players) {
             p.sendTitlePart(TitlePart.TITLE, Component.text("游戏被强行终止").color(NamedTextColor.RED));
         }
-        endGame();
+        endGame(false);
     }
 
     @EventHandler
@@ -448,6 +510,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
         if (event.getAction() == Action.RIGHT_CLICK_BLOCK &&
                 blockLocationEqual(event.getClickedBlock().getLocation(), gameTimeSignLocation) &&
                 !running) {
+            // change game time
             Player p = event.getPlayer();
             int gameTimeMinutes = getGameTimeMinutesFromSign(gameTimeSignLocation);
             if (p.isSneaking()) {
@@ -469,39 +532,73 @@ public class HideAndSeekCityGame extends Game implements Listener {
         } else if (event.getAction() == Action.RIGHT_CLICK_BLOCK &&
                 blockLocationEqual(event.getClickedBlock().getLocation(), startButtonLocation) &&
                 !running) {
+            // click button to start game
             startGame();
         } else if (event.getAction().isLeftClick() && running) {
-            Player p = event.getPlayer();
-            if (!seekers.contains(p)) return;
-            RayTraceResult result = world.rayTrace(p.getEyeLocation(), p.getEyeLocation().getDirection(), 3, FluidCollisionMode.NEVER, true, 0, e1 -> !e1.getUniqueId().equals(p.getUniqueId()));
+            // seeker attack logic (because hiders are, well, hidden!)
+            Player seeker = event.getPlayer();
+            if (!seekers.contains(seeker)) return;
+            RayTraceResult result = world.rayTrace(seeker.getEyeLocation(), seeker.getEyeLocation().getDirection(), 3, FluidCollisionMode.NEVER, true, 0, e1 -> !e1.getUniqueId().equals(seeker.getUniqueId()));
             if (result == null) return;
-            Block b = result.getHitBlock();
-            Entity e = result.getHitEntity();
+            Block hitBlock = result.getHitBlock();
+            Entity hitEntity = result.getHitEntity();
             Player hider;
-            if (b != null) {
-                hider = hiders.stream().filter(p1 -> blockLocationEqual(p1.getLocation(), b.getLocation())).findFirst().orElseThrow();
-            } else if (e != null) {
-                if (!(e instanceof BlockDisplay fb)) return;
-                if (!disguiseFakeBlocks.containsValue(fb.getUniqueId())) return;
-                hider = Bukkit.getPlayer(disguiseFakeBlocks.entrySet().stream().filter(entry -> entry.getValue().equals(fb.getUniqueId())).findFirst().orElseThrow().getKey());
+            if (hitBlock != null) {
+                hider = hiders.stream().filter(oneHider -> blockLocationEqual(oneHider.getLocation(), hitBlock.getLocation())).findFirst().orElse(null);
+            } else if (hitEntity != null) {
+                if (hitEntity instanceof Player hitPlayer) {
+                    if (!hiders.contains(hitPlayer)) return;
+                    hider = hitPlayer;
+                } else if (hitEntity instanceof BlockDisplay fakeBlockDisplay) {
+                    Map.Entry<UUID, HiderData> hiderEntry = hiderDataMap.entrySet().stream().filter(entry -> entry.getValue().fakeBlockDisplayId.equals(fakeBlockDisplay.getUniqueId())).findFirst().orElse(null);
+                    if (hiderEntry == null) return;
+                    hider = Bukkit.getPlayer(hiderEntry.getKey());
+                } else return;
             } else return;
-            p.attack(hider);
+            if (hider == null) return;
+            seeker.attack(hider);
         } else if (event.getAction().isRightClick() && running) {
-            Player p = event.getPlayer();
-            ItemStack i = p.getInventory().getItemInMainHand();
-            if (i.equals(tauntItem) && hiders.contains(p)) {
-                world.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BELL, 0.4F, 1.0F);
-                new ParticleBuilder(Particle.NOTE).location(p.getEyeLocation()).count(1).allPlayers().force(true).spawn();
-                getFakeBlock(p.getUniqueId()).setGlowing(true);
-                taskIds.add(Bukkit.getScheduler().runTaskLater(plugin, () -> getFakeBlock(p.getUniqueId()).setGlowing(false), 3 * 20L).getTaskId());
-                int countdownNow = gameCountdown.get();
-                if (countdownNow > 0) gameCountdown.set(countdownNow < countdownNow ? 0 : countdownNow - 3);
-                p.getInventory().remove(tauntItem);
-                taskIds.add(Bukkit.getScheduler().runTaskLater(plugin, () -> p.getInventory().addItem(tauntItem), 15 * 20L).getTaskId());
-            } else if (i.equals(soundItem) && seekers.contains(p)) {
+            // various props
+            Player player = event.getPlayer();
+            ItemStack item = player.getInventory().getItemInMainHand();
+            if (item.equals(tauntItem) && hiders.contains(player)) {
+                // hiders taunt (-3s)
+                world.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BELL, 0.4F, 1.0F);
+                new ParticleBuilder(Particle.NOTE).location(player.getEyeLocation()).count(1).receivers(players).force(true).spawn();
+                BlockDisplay fakeBlockDisplay = getFakeBlockDisplay(player.getUniqueId());
+                if (fakeBlockDisplay != null) {
+                    fakeBlockDisplay.setGlowing(true);
+                }
+                taskIds.add(Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    BlockDisplay fakeBlockDisplayAfter = getFakeBlockDisplay(player.getUniqueId());
+                    if (fakeBlockDisplayAfter != null) {
+                        fakeBlockDisplayAfter.setGlowing(false);
+                    }
+                }, 3 * 20L).getTaskId());
+                int countdownNow = catchingCountdown.get();
+                catchingCountdown.set(countdownNow < 3 ? 0 : countdownNow - 3);
+                player.getInventory().remove(tauntItem);
+                taskIds.add(Bukkit.getScheduler().runTaskLater(plugin, () -> player.getInventory().addItem(tauntItem), 15 * 20L).getTaskId());
+            } else if (item.equals(soundItem) && seekers.contains(player)) {
+                // seekers make hiders make sound and particles
                 hiders.forEach(p1 -> world.playSound(p1.getLocation(), Sound.BLOCK_NOTE_BLOCK_BELL, 0.3F, 1.0F));
                 seekers.forEach(p1 -> p1.getInventory().remove(soundItem));
                 taskIds.add(Bukkit.getScheduler().runTaskLater(plugin, () -> seekers.forEach(p1 -> p1.getInventory().addItem(soundItem)), 30 * 20L).getTaskId());
+            } else if (hiders.contains(player)) {
+                // hiders change disguise material
+                HiderData hiderData = hiderDataMap.get(player.getUniqueId());
+                List<Material> blockMaterials = List.of(
+                        Material.SPRUCE_PLANKS,
+                        Material.ANVIL,
+                        Material.BEACON,
+                        Material.DARK_PRISMARINE,
+                        Material.OAK_LEAVES
+                );
+                if (blockMaterials.contains(item.getType())) {
+                    hiderData.disguiseMaterial = item.getType();
+                    BlockDisplay fakeBlockDisplay = getFakeBlockDisplay(player.getUniqueId());
+                    if (fakeBlockDisplay != null) fakeBlockDisplay.remove();
+                }
             }
         }
     }
@@ -511,7 +608,8 @@ public class HideAndSeekCityGame extends Game implements Listener {
         if (!running) return;
         Player p = event.getPlayer();
         if (!hiders.contains(p)) return;
-        if (!disguised.get(p.getUniqueId())) return;
+        HiderData hiderData = hiderDataMap.get(p.getUniqueId());
+        if (!hiderData.disguised) return;
         if (getDistance(event.getFrom(), event.getTo()) <= 0.1) return;
         players.forEach(
                 p1 -> p1.sendBlockChange(
@@ -519,8 +617,11 @@ public class HideAndSeekCityGame extends Game implements Listener {
                         Material.AIR.createBlockData()
                 )
         );
-        disguised.put(p.getUniqueId(), false);
-        getFakeBlock(disguiseFakeBlocks.get(p.getUniqueId())).setTransformation(new Transformation(new Vector3f(0, 0, 0), new AxisAngle4f(0, 0, 0, 0), new Vector3f(0.999f, 0.999f, 0.999f), new AxisAngle4f(0, 0, 0, 0)));
+        hiderData.disguised = false;
+        BlockDisplay fakeBlockDisplay = getFakeBlockDisplay(p.getUniqueId());
+        if (fakeBlockDisplay != null) {
+            fakeBlockDisplay.setTransformation(new Transformation(new Vector3f(0, 0, 0), new AxisAngle4f(0, 0, 0, 0), new Vector3f(0.999f, 0.999f, 0.999f), new AxisAngle4f(0, 0, 0, 0)));
+        }
     }
 
     @EventHandler
@@ -528,12 +629,21 @@ public class HideAndSeekCityGame extends Game implements Listener {
         if (!running) return;
         Player p = event.getPlayer();
         if (!hiders.contains(p)) return;
+        BlockDisplay fakeBlockDisplay = getFakeBlockDisplay(p.getUniqueId());
+        if (fakeBlockDisplay != null) {
+            fakeBlockDisplay.remove();
+        }
         p.getInventory().clear();
         playersTeam.removePlayer(p);
         seekers.add(p);
         hiders.remove(p);
-        getFakeBlock(disguiseFakeBlocks.get(p.getUniqueId())).remove();
         p.getInventory().addItem(seekerWeaponItem);
+    }
+
+    @EventHandler
+    public void onPlayerInventoryClick(InventoryClickEvent event) {
+        if (!running) return;
+        event.setCancelled(true);
     }
 
     private boolean blockLocationEqual(Location l1, Location l2) {
@@ -546,18 +656,27 @@ public class HideAndSeekCityGame extends Game implements Listener {
         return Integer.parseInt(sign.getLine(0).split("\\s")[1]);
     }
 
-    private BlockDisplay getFakeBlock(UUID uuid) {
-        return world.getEntitiesByClass(BlockDisplay.class).stream().filter(
-                e -> e.getUniqueId().equals(uuid))
-                .findFirst().orElse(null);
+    private BlockDisplay getFakeBlockDisplay(UUID hiderId) {
+        if (hiders.stream().map(Player::getUniqueId).noneMatch(id -> id.equals(hiderId))) {
+            return null;
+        }
+        HiderData data = hiderDataMap.get(hiderId);
+        UUID fakeBlockDisplayId = data.fakeBlockDisplayId;
+        return world.getEntitiesByClass(BlockDisplay.class)
+                .stream()
+                .filter(blockDisplay -> blockDisplay.getUniqueId().equals(fakeBlockDisplayId))
+                .findFirst()
+                .orElse(null);
     }
 
-    private void spawnDisguiseFakeBlock(Player p) {
-        Location playerLoc = p.getLocation();
-        UUID playerId = p.getUniqueId();
-        BlockDisplay fakeBlock = (BlockDisplay) world.spawnEntity(playerLoc, EntityType.BLOCK_DISPLAY);
-        fakeBlock.setBlock(disguiseMaterials.get(playerId).createBlockData());
-        disguiseFakeBlocks.put(playerId, fakeBlock.getUniqueId());
+    private BlockDisplay spawnFakeBlockDisplay(Player hider) {
+        Location hiderLoc = hider.getLocation();
+        UUID hiderId = hider.getUniqueId();
+        HiderData hiderData = hiderDataMap.get(hiderId);
+        BlockDisplay fakeBlockDisplay = (BlockDisplay) world.spawnEntity(hiderLoc, EntityType.BLOCK_DISPLAY);
+        fakeBlockDisplay.setBlock(hiderData.disguiseMaterial.createBlockData());
+        hiderData.fakeBlockDisplayId = fakeBlockDisplay.getUniqueId();
+        return fakeBlockDisplay;
     }
 
     private double getDistance(Location l1, Location l2) {
@@ -569,7 +688,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
     }
 
     public void onDisable() {
-        endGame();
+        endGame(true);
         mainObjective.unregister();
         sneakTimeObjective.unregister();
     }
@@ -581,5 +700,12 @@ public class HideAndSeekCityGame extends Game implements Listener {
     @SuppressWarnings("SameParameterValue")
     private Location offsetLocation(Location baseLocation, double dx, double dy, double dz) {
         return new Location(baseLocation.getWorld(), baseLocation.getX() + dx, baseLocation.getY() + dy, baseLocation.getZ() + dz);
+    }
+
+    private static class HiderData {
+        Material disguiseMaterial;
+        UUID fakeBlockDisplayId;
+        boolean disguised;
+        Location previousLocation;
     }
 }

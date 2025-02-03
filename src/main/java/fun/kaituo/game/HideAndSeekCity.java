@@ -42,7 +42,7 @@ public class HideAndSeekCity extends JavaPlugin implements Listener {
     public void onDisable() {
         Bukkit.getScheduler().cancelTasks(this);
         HandlerList.unregisterAll((Plugin) this);
-        if (players.size() > 0) {
+        if (!players.isEmpty()) {
             for (Player p : players) {
                 p.teleport(new Location(world, 0.5, 89.0, 0.5));
                 Bukkit.getPluginManager().callEvent(new PlayerChangeGameEvent(p, getGameInstance(), null));
