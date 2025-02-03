@@ -139,6 +139,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
         ) {
             @Override
             public void onPacketSending(PacketEvent event) {
+                if (!running) return;
                 PacketContainer packet = event.getPacket();
                 if (!seekers.contains(event.getPlayer())) return;  // not a seeker receiving this packet
                 int entityId = packet.getIntegers().read(0);
@@ -162,6 +163,9 @@ public class HideAndSeekCityGame extends Game implements Listener {
 
     protected void initializeGameRunnable() {
         gameRunnable = () -> {
+            removeStartButton();
+            placeSpectateButton();
+
             // add players and assign init roles
             players.addAll(getPlayersNearHub(12.5, 3.0, 10.5));
             seekers.addAll(
@@ -391,6 +395,9 @@ public class HideAndSeekCityGame extends Game implements Listener {
     private void endGame(boolean disabling) {
         // clean tasks
         cancelGameTasks();
+
+        removeSpectateButton();
+        placeStartButton();
 
         // clean scoreboards
         mainObjective.getScore("剩余时间").resetScore();
