@@ -25,6 +25,7 @@ import org.bukkit.entity.*;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -34,8 +35,10 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scoreboard.*;
+import org.bukkit.util.BoundingBox;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Transformation;
+import org.bukkit.util.Vector;
 import org.joml.AxisAngle4f;
 import org.joml.Vector3f;
 
@@ -54,12 +57,14 @@ public class HideAndSeekCityGame extends Game implements Listener {
     private final ArrayList<Player> hiders;
 
     private final HashMap<UUID, HiderData> hiderDataMap;
+    private UUID lastHiderUUID = null;
 
     // scoreboards
     private final Scoreboard mainScoreboard;
     private final Scoreboard gameScoreboard;
     private final Objective mainObjective;
     private final Objective sneakTimeObjective;
+    private final Objective killCountObjective;
     private final Team mainSeekersTeam;
     private final Team mainHidersTeam;
     private final Team playersTeam;
@@ -79,9 +84,9 @@ public class HideAndSeekCityGame extends Game implements Listener {
     private final ItemStack seekerWeaponItem;
 
     private int gameMainTaskId;
-    private int catchingCountdownTaskId;
+    private int catchTimeCountdownTaskId;
     private int fakeBlockDisplayTaskId;
-    private AtomicInteger catchingCountdown;
+    private AtomicInteger catchTimeCountdown;
     private boolean running;
 
     private HideAndSeekCityGame(HideAndSeekCity plugin) {
@@ -98,6 +103,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
         mainObjective = gameScoreboard.registerNewObjective("game_main", Criteria.DUMMY, Component.text("方块捉迷藏", NamedTextColor.AQUA));
         mainObjective.setDisplaySlot(DisplaySlot.SIDEBAR);
         sneakTimeObjective = gameScoreboard.registerNewObjective("sneak_time", Criteria.statistic(Statistic.SNEAK_TIME), Component.text("Sneak Time"));
+        killCountObjective = gameScoreboard.registerNewObjective("player_kills", Criteria.statistic(Statistic.PLAYER_KILLS), Component.text("Kills"));
         playersTeam = gameScoreboard.registerNewTeam("players");
         playersTeam.setOption(Team.Option.COLLISION_RULE, Team.OptionStatus.NEVER);
         playersTeam.setOption(Team.Option.NAME_TAG_VISIBILITY, Team.OptionStatus.NEVER);
@@ -215,6 +221,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
             taskIds.add(Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 for (Player p: players) {
                     p.setScoreboard(gameScoreboard);
+                    killCountObjective.getScore(p).resetScore();
                 }
                 for (Player seeker: seekers) {
                     seeker.teleport(seekerStartLocation);
@@ -358,7 +365,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
                     hiderData.previousLocation = hiderLoc;
                 }
                 mainObjective.getScore("剩余躲藏者").setScore(hiders.size());
-                if (hiders.isEmpty() || catchingCountdown.get() == 0) {
+                if (hiders.isEmpty() || catchTimeCountdown.get() == 0) {
                     endGame(false);
                 }
             }, 5 * 20L, 1);
@@ -374,21 +381,32 @@ public class HideAndSeekCityGame extends Game implements Listener {
                         fakeBlockDisplay = spawnFakeBlockDisplay(hider);
                         hiderData.fakeBlockDisplayId = fakeBlockDisplay.getUniqueId();
                     }
+                    BlockDisplay finalFakeBlockDisplay = fakeBlockDisplay;
                     if (hiderData.disguised) {
                         fakeBlockDisplay.teleport(offsetLocation(hiderLoc.getBlock().getLocation(), 0.00125, 0.00125, 0.00125));
                         fakeBlockDisplay.setTransformation(new Transformation(new Vector3f(0, 0, 0), new AxisAngle4f(0, 0, 0, 0), new Vector3f(0.9975f, 0.9975f, 0.9975f), new AxisAngle4f(0, 0, 0, 0)));
+                        players.forEach(p -> {
+                            if (!p.getUniqueId().equals(hiderId)) {
+                                p.hideEntity(plugin, finalFakeBlockDisplay);
+                            }
+                        });
                     } else {
                         fakeBlockDisplay.teleport(offsetLocation(removePitchYaw(hiderLoc), -0.5, 0, -0.5));
+                        players.forEach(p -> {
+                            if (!p.getUniqueId().equals(hiderId)) {
+                                p.showEntity(plugin, finalFakeBlockDisplay);
+                            }
+                        });
                     }
                 }
             }, 5 * 20L, 1);
             taskIds.add(fakeBlockDisplayTaskId);
-            catchingCountdown = new AtomicInteger(getGameTimeMinutesFromSign(gameTimeSignLocation) * 60);
-            catchingCountdownTaskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, () -> {
-                mainObjective.getScore("剩余时间").setScore(catchingCountdown.get());
-                catchingCountdown.getAndDecrement();
+            catchTimeCountdown = new AtomicInteger(getGameTimeMinutesFromSign(gameTimeSignLocation) * 60);
+            catchTimeCountdownTaskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, () -> {
+                mainObjective.getScore("剩余时间").setScore(catchTimeCountdown.get());
+                catchTimeCountdown.getAndDecrement();
             }, 65 * 20L, 20L);
-            taskIds.add(catchingCountdownTaskId);
+            taskIds.add(catchTimeCountdownTaskId);
         };
     }
 
@@ -431,6 +449,50 @@ public class HideAndSeekCityGame extends Game implements Listener {
             p.clearActivePotionEffects();
             p.addPotionEffect(new PotionEffect(PotionEffectType.INSTANT_HEALTH, 1, 20));
             p.addPotionEffect(new PotionEffect(PotionEffectType.SATURATION, 1, 20));
+            p.sendMessage(
+                    Component.text("=====", NamedTextColor.YELLOW).append(
+                            Component.text("结果", NamedTextColor.AQUA).append(
+                                    Component.text("=====", NamedTextColor.YELLOW))));
+            p.sendMessage(Component.empty());
+            p.sendMessage(winMessage);
+            Component winners = Component.empty();
+            if (!hiders.isEmpty()) {
+                for (Player hider: hiders) {
+                    winners = winners.append(hider.name());
+                    winners = winners.append(Component.text(" "));
+                }
+            } else {
+                for (Player seeker: seekers) {
+                    if (seeker.getUniqueId().equals(lastHiderUUID)) continue;
+                    winners = winners.append(seeker.name());
+                    winners = winners.append(Component.text(" "));
+                }
+            }
+            p.sendMessage(Component.text("获胜者：", NamedTextColor.GREEN).append(winners));
+            p.sendMessage(Component.empty());
+            p.sendMessage(Component.text("击杀数", NamedTextColor.RED));
+            Set<String> trackedEntries = gameScoreboard.getEntries();
+            List<String> playerNames = seekers.stream().filter(s -> !s.getUniqueId().equals(lastHiderUUID)).map(Player::getName).toList();
+            List<String> filteredEntries = trackedEntries.stream().filter(playerNames::contains).toList();
+            HashMap<String, Score> killCounts = new HashMap<>();
+            for (String entry: filteredEntries) {
+                Score score = killCountObjective.getScore(entry);
+                if (score != null) {
+                    killCounts.put(entry, score);
+                }
+            }
+            List<Map.Entry<String, Score>> topThree = killCounts.entrySet().stream()
+                    .sorted((e1, e2) -> e2.getValue().getScore() - e1.getValue().getScore())
+                    .limit(3).toList();
+            for (Map.Entry<String, Score> entry: topThree) {
+                p.sendMessage(
+                        Component.text(entry.getKey(), NamedTextColor.GOLD).append(
+                                Component.text(" ").append(
+                                        Component.text(entry.getValue().getScore(), NamedTextColor.GREEN)
+                                )
+                        )
+                );
+            }
         }
 
         // show hiders
@@ -526,6 +588,17 @@ public class HideAndSeekCityGame extends Game implements Listener {
     }
 
     @EventHandler
+    public void onEntityDamage(EntityDamageEvent event) {
+        if (!running) return;
+        Entity entity = event.getEntity();
+        if (!(entity instanceof Player player)) return;
+        if (!players.contains(player)) return;
+        if (event.getCause() == EntityDamageEvent.DamageCause.ENTITY_ATTACK ||
+        event.getCause() == EntityDamageEvent.DamageCause.ENTITY_SWEEP_ATTACK) return;
+        event.setCancelled(true);
+    }
+
+    @EventHandler
     public void onPlayerInteract(PlayerInteractEvent event) {
         if (event.getAction() == Action.RIGHT_CLICK_BLOCK &&
                 blockLocationEqual(event.getClickedBlock().getLocation(), gameTimeSignLocation) &&
@@ -557,23 +630,44 @@ public class HideAndSeekCityGame extends Game implements Listener {
         } else if (event.getAction().isLeftClick() && running) {
             // seeker attack logic (because hiders are, well, hidden!)
             Player seeker = event.getPlayer();
+            Bukkit.broadcast(Component.text("==== FIRST CHECK: ").append(seeker.name()));
             if (!seekers.contains(seeker)) return;
-            RayTraceResult result = world.rayTraceEntities(seeker.getEyeLocation(), seeker.getEyeLocation().getDirection(), 3, e -> !e.getUniqueId().equals(seeker.getUniqueId()));
-            if (result == null) return;
-            Entity hitEntity = result.getHitEntity();
-            Player hider;
-            if (hitEntity != null) {
-                if (hitEntity instanceof Player hitPlayer) {
-                    if (!hiders.contains(hitPlayer)) return;
-                    hider = hitPlayer;
-                } else if (hitEntity instanceof BlockDisplay fakeBlockDisplay) {
-                    Map.Entry<UUID, HiderData> hiderEntry = hiderDataMap.entrySet().stream().filter(entry -> entry.getValue().fakeBlockDisplayId.equals(fakeBlockDisplay.getUniqueId())).findFirst().orElse(null);
-                    if (hiderEntry == null) return;
-                    hider = Bukkit.getPlayer(hiderEntry.getKey());
-                } else return;
-            } else return;
-            if (hider == null) return;
-            seeker.attack(hider);
+            Location seekerEyeLoc = seeker.getEyeLocation();
+            Vector rayTraceStart = seekerEyeLoc.toVector();
+            Vector rayTraceDirection = seekerEyeLoc.getDirection();
+            Player target = null;
+            for (Player hider: hiders) {
+                BoundingBox toBeChecked = hider.getBoundingBox();
+                RayTraceResult result = toBeChecked.rayTrace(rayTraceStart, rayTraceDirection, 3.0);
+                if (result != null) {
+                    target = hider;
+                    break;
+                }
+                HiderData hiderData = hiderDataMap.get(hider.getUniqueId());
+                if (hiderData.disguised) {
+                    Location blockLoc = hider.getLocation().toBlockLocation();
+                    toBeChecked = new BoundingBox(
+                            blockLoc.x() - 0.00125, blockLoc.y() - 0.00125, blockLoc.z() - 0.00125,
+                            blockLoc.x() + 1.00125, blockLoc.y() + 1.00125, blockLoc.z() + 1.00125
+                    );
+                } else {
+                    BlockDisplay fbd = getFakeBlockDisplay(hider.getUniqueId());
+                    if (fbd != null) {
+                        toBeChecked = new BoundingBox(
+                                fbd.getX(), fbd.getY(), fbd.getZ(),
+                                fbd.getX() + 1, fbd.getY() + 1, fbd.getZ() + 1
+                        );
+                    } else continue;
+                }
+                result = toBeChecked.rayTrace(rayTraceStart, rayTraceDirection, 3.0);
+                if (result != null) {
+                    target = hider;
+                    break;
+                }
+            }
+            if (target == null) return;
+            event.setCancelled(true);
+            seeker.attack(target);
         } else if (event.getAction().isRightClick() && running) {
             // various props
             Player player = event.getPlayer();
@@ -592,8 +686,8 @@ public class HideAndSeekCityGame extends Game implements Listener {
                         fakeBlockDisplayAfter.setGlowing(false);
                     }
                 }, 3 * 20L).getTaskId());
-                int countdownNow = catchingCountdown.get();
-                catchingCountdown.set(countdownNow < 3 ? 0 : countdownNow - 3);
+                int countdownNow = catchTimeCountdown.get();
+                catchTimeCountdown.set(countdownNow < 3 ? 0 : countdownNow - 3);
                 player.getInventory().remove(tauntItem);
                 taskIds.add(Bukkit.getScheduler().runTaskLater(plugin, () -> player.getInventory().addItem(tauntItem), 15 * 20L).getTaskId());
             } else if (item.equals(soundItem) && seekers.contains(player)) {
@@ -653,6 +747,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
             fakeBlockDisplay.remove();
         }
         p.getInventory().clear();
+        if (hiders.size() == 1) lastHiderUUID = p.getUniqueId();
         seekers.add(p);
         hiders.remove(p);
         p.getInventory().addItem(seekerWeaponItem);
@@ -708,6 +803,7 @@ public class HideAndSeekCityGame extends Game implements Listener {
     public void onDisable() {
         endGame(true);
         mainObjective.unregister();
+        killCountObjective.unregister();
         sneakTimeObjective.unregister();
         playersTeam.unregister();
         mainSeekersTeam.removeEntries(mainSeekersTeam.getEntries());
