@@ -630,7 +630,6 @@ public class HideAndSeekCityGame extends Game implements Listener {
         } else if (event.getAction().isLeftClick() && running) {
             // seeker attack logic (because hiders are, well, hidden!)
             Player seeker = event.getPlayer();
-            Bukkit.broadcast(Component.text("==== FIRST CHECK: ").append(seeker.name()));
             if (!seekers.contains(seeker)) return;
             Location seekerEyeLoc = seeker.getEyeLocation();
             Vector rayTraceStart = seekerEyeLoc.toVector();
